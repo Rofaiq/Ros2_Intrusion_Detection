@@ -1,0 +1,20 @@
+# Parameters for the ids_monitor node. Rates are in Hz of simulation time.
+ids_monitor:
+  ros__parameters:
+    cmd_vel_topic: /cmd_vel
+    cmd_vel_stamped: true          # TurtleBot3 on Jazzy uses TwistStamped
+    odom_topic: /odom
+    scan_topic: /scan
+    allowed_cmd_vel_publishers: ["/safety_gate"]
+    max_publishers_per_topic: 1
+    graph_check_period_s: 0.5
+    cmd_vel_max_hz: 60.0
+    odom_max_hz: 60.0
+    odom_min_hz: 5.0
+    scan_max_hz: 8.0               # burger LiDAR runs at 5 Hz
+    scan_min_hz: 2.0
+    consistency_threshold: 0.15
+    robot_max_speed: 0.5           # m/s, a little above the burger limit (0.22)
+    robot_max_angular_speed: 3.0   # rad/s, burger limit is 2.84
+    enabled_detectors: [rate, cmd_odom_consistency, scan_sanity, odom_replay,
+                        publisher_allowlist, publisher_count]

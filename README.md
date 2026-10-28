@@ -1,0 +1,87 @@
+# ROS 2 Robot Intrusion Detection
+
+[![CI](../../actions/workflows/ci.yml/badge.svg)](../../actions/workflows/ci.yml)
+
+Detecting cyber attacks on a ROS 2 mobile robot and bringing it to a safe stop.
+
+ROS 2's default transport (DDS) has no authentication: any process on the same
+network and domain ID can publish velocity commands or fake sensor data. This
+project injects realistic attacks into a simulated TurtleBot3 and detects them
+with lightweight, physics-aware checks, building towards a learned detector in
+the spirit of industrial control-system intrusion detection
+([Ahmad, Mansoor et al., *Expert Systems with Applications*, 2026](https://doi.org/10.1016/j.eswa.2025.130463)).
+
+## How it works
+
+```mermaid
+flowchart LR
+    teleop[Teleop / Nav2] -- cmd_vel_in --> gate[safety_gate]
+    gate -- cmd_vel --> robot[TurtleBot3 in Gazebo]
+    attacker[attack_injector] -. spoofed cmd_vel / scan / odom .-> robot
+    robot -- odom, scan --> monitor[ids_monitor]
+    gate -- cmd_vel --> monitor
+    monitor -- /ids/attack_detected --> gate
+    monitor -- /ids/events --> log[(events)]
+```
+
+* **`ids_monitor`** watches `/cmd_vel`, `/odom` and `/scan`, inspects the ROS
+  graph for unexpected publishers, and latches `/ids/attack_detected` on the
+  first alert. Reset it with `ros2 service call /ids/reset std_srvs/srv/Trigger`.
+* **`safety_gate`** is the only node meant to drive the robot. It forwards
+  commands from `cmd_vel_in` and, once the alarm is raised, blocks them and
+  publishes zero velocity.
+* **`attack_injector`** plays the attacker.
+
+| Attack | What the attacker does | Detected by |
+|---|---|---|
+| `cmd_vel_spoof` | Publishes its own velocity commands | unexpected publisher, command/odometry mismatch |
+| `scan_spoof` | Publishes fake LiDAR scans of a nearby wall | scan rate, scan discontinuity, publisher count |
+| `odom_replay` | Replays recorded odometry with old timestamps | stamps going backwards, impossible jumps |
+| `flood` | Sends commands at ~1 kHz (DoS) | message rate |
+
+The detectors live in [`robot_ids/detectors.py`](robot_ids/robot_ids/detectors.py)
+and have no ROS imports, so they are unit-tested with plain pytest.
+
+## Quick start
+
+Requires Ubuntu 24.04 with ROS 2 Jazzy and the TurtleBot3 simulation packages;
+see [docs/SETUP.md](docs/SETUP.md).
+
+```bash
+mkdir -p ~/ids_ws/src && cd ~/ids_ws/src
+git clone https://github.com/Rofaiq/ros2-robot-intrusion-detection.git
+cd ~/ids_ws && colcon build --symlink-install && source install/setup.bash
+
+# Terminal 1: simulator + monitor + safety gate
+ros2 launch robot_ids sim.launch.py
+
+# Terminal 2: drive the robot through the gate
+ros2 run turtlebot3_teleop teleop_keyboard --ros-args -r cmd_vel:=cmd_vel_in
+
+# Terminal 3: attack, then watch the monitor stop the robot
+ros2 launch robot_ids attack.launch.py attack:=cmd_vel_spoof
+ros2 topic echo /ids/events
+```
+
+Run the tests with `colcon test --packages-select robot_ids && colcon test-result --verbose`.
+
+## Limitations
+
+Detection is not prevention. An attacker publishing directly on `/cmd_vel`
+competes with the safety gate's stop commands, so the robot may still move.
+Preventing this needs authenticated, access-controlled DDS (SROS2), which is on
+the roadmap below.
+
+## Roadmap
+
+- [x] Attack injector, rule-based detectors, latched alarm and safety gate
+- [ ] Measure detection rate, false alarms and time-to-detect for each attack
+- [ ] Record labelled datasets and train an MLP / autoencoder detector
+- [ ] Autonomous navigation with Nav2 during attacks
+- [ ] SROS2 access control, and a comparison of detection vs. prevention
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for details.
+
+## License
+
+Apache-2.0
