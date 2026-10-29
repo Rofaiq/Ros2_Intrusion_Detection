@@ -1,18 +1,27 @@
-# Setup: Ubuntu 24.04 + ROS 2 Jazzy + TurtleBot3 simulation
+# Setup: ROS 2 + TurtleBot3 simulation
 
-These steps follow the official guides:
-[ROS 2 Jazzy install](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debs.html)
-and [TurtleBot3 simulation](https://emanual.robotis.com/docs/en/platform/turtlebot3/simulation/).
-If a command fails, check those pages first; they are updated more often than this file.
+| Ubuntu | ROS 2 | Simulator | Velocity message |
+|---|---|---|---|
+| 22.04 (jammy) | Humble | Gazebo Classic 11 | `Twist` |
+| 24.04 (noble) | Jazzy | Gazebo Harmonic | `TwistStamped` |
+
+The steps below are for **Humble on Ubuntu 22.04**. For Jazzy, replace
+`humble` with `jazzy` everywhere and install `ros-jazzy-ros-gz` instead of
+the `gazebo` packages.
+
+They follow the official guides, which are updated more often than this file:
+[ROS 2 Humble install](https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debs.html)
+and [TurtleBot3 simulation](https://emanual.robotis.com/docs/en/platform/turtlebot3/simulation/)
+(choose "Humble" at the top of that page).
 
 ## 1. Check your machine
 
 ```bash
-lsb_release -a   # needs Ubuntu 24.04 (noble) for Jazzy
+lsb_release -a   # Ubuntu 22.04 for Humble
 free -h          # 8 GB RAM is enough, 16 GB is comfortable
 ```
 
-## 2. Install ROS 2 Jazzy
+## 2. Install ROS 2 Humble
 
 ```bash
 sudo apt update && sudo apt install -y software-properties-common curl
@@ -24,8 +33,8 @@ curl -L -o /tmp/ros2-apt-source.deb "https://github.com/ros-infrastructure/ros-a
 sudo dpkg -i /tmp/ros2-apt-source.deb
 
 sudo apt update && sudo apt upgrade -y
-sudo apt install -y ros-jazzy-desktop ros-dev-tools
-echo "source /opt/ros/jazzy/setup.bash" >> ~/.bashrc
+sudo apt install -y ros-humble-desktop ros-dev-tools
+echo "source /opt/ros/humble/setup.bash" >> ~/.bashrc
 source ~/.bashrc
 sudo rosdep init && rosdep update
 ```
@@ -36,14 +45,25 @@ Check it works: run `ros2 run demo_nodes_cpp talker` in one terminal and
 ## 3. Install Gazebo and TurtleBot3
 
 ```bash
-sudo apt install -y ros-jazzy-ros-gz ros-jazzy-turtlebot3 \
-    ros-jazzy-turtlebot3-simulations ros-jazzy-turtlebot3-teleop \
-    ros-jazzy-navigation2 ros-jazzy-nav2-bringup
+sudo apt install -y ros-humble-gazebo-ros-pkgs \
+    ros-humble-turtlebot3 ros-humble-turtlebot3-msgs \
+    ros-humble-turtlebot3-simulations ros-humble-turtlebot3-teleop \
+    ros-humble-navigation2 ros-humble-nav2-bringup
 echo "export TURTLEBOT3_MODEL=burger" >> ~/.bashrc
 source ~/.bashrc
 ```
 
-Check it works:
+If apt cannot find `ros-humble-turtlebot3-simulations`, build it from source
+instead, as the TurtleBot3 manual describes:
+
+```bash
+mkdir -p ~/tb3_ws/src && cd ~/tb3_ws/src
+git clone -b humble https://github.com/ROBOTIS-GIT/turtlebot3_simulations.git
+cd ~/tb3_ws && colcon build --symlink-install
+echo "source ~/tb3_ws/install/setup.bash" >> ~/.bashrc
+```
+
+Check it works (the first start can take a minute while Gazebo loads models):
 
 ```bash
 ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py
@@ -53,7 +73,7 @@ ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py
 
 ```bash
 mkdir -p ~/ids_ws/src && cd ~/ids_ws/src
-git clone https://github.com/Rofaiq/ros2-robot-intrusion-detection.git
+git clone https://github.com/Rofaiq/Ros2_Intrusion_Detection.git
 cd ~/ids_ws
 rosdep install --from-paths src --ignore-src -y
 colcon build --symlink-install
@@ -67,6 +87,8 @@ Then follow the Quick start in the [README](../README.md).
 
 * **Gazebo window is black or very slow:** try `export LIBGL_ALWAYS_SOFTWARE=1`
   before launching, or close other heavy applications.
+* **Gazebo hangs at start or says the address is in use:** a previous Gazebo
+  is still running; run `killall gzserver gzclient` and try again.
 * **Robot does not move with teleop:** make sure you remapped teleop to
   `cmd_vel_in` and that `/ids/attack_detected` is false
   (`ros2 topic echo /ids/attack_detected`). Reset with

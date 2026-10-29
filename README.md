@@ -44,12 +44,14 @@ and have no ROS imports, so they are unit-tested with plain pytest.
 
 ## Quick start
 
-Requires Ubuntu 24.04 with ROS 2 Jazzy and the TurtleBot3 simulation packages;
-see [docs/SETUP.md](docs/SETUP.md).
+Works with ROS 2 **Humble** (Ubuntu 22.04, Gazebo Classic) and **Jazzy**
+(Ubuntu 24.04, Gazebo Harmonic) plus the TurtleBot3 simulation packages; see
+[docs/SETUP.md](docs/SETUP.md). The velocity message type (`Twist` on Humble,
+`TwistStamped` on Jazzy) is picked automatically from `ROS_DISTRO`.
 
 ```bash
 mkdir -p ~/ids_ws/src && cd ~/ids_ws/src
-git clone https://github.com/Rofaiq/ros2-robot-intrusion-detection.git
+git clone https://github.com/Rofaiq/Ros2_Intrusion_Detection.git
 cd ~/ids_ws && colcon build --symlink-install && source install/setup.bash
 
 # Terminal 1: simulator + monitor + safety gate

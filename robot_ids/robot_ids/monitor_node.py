@@ -19,6 +19,7 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
+from robot_ids.compat import default_cmd_vel_stamped
 from robot_ids.detectors import (CmdOdomConsistencyDetector, OdomReplayDetector,
                                  RateDetector, ScanSanityDetector, check_publishers)
 
@@ -33,7 +34,7 @@ class MonitorNode(Node):
         super().__init__('ids_monitor')
 
         self.declare_parameter('cmd_vel_topic', '/cmd_vel')
-        self.declare_parameter('cmd_vel_stamped', True)
+        self.declare_parameter('cmd_vel_stamped', default_cmd_vel_stamped())
         self.declare_parameter('odom_topic', '/odom')
         self.declare_parameter('scan_topic', '/scan')
         self.declare_parameter('allowed_cmd_vel_publishers', ['/safety_gate'])

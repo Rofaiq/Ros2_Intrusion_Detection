@@ -17,12 +17,14 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
 
+from robot_ids.compat import default_cmd_vel_stamped
+
 
 class SafetyGateNode(Node):
 
     def __init__(self):
         super().__init__('safety_gate')
-        self.declare_parameter('cmd_vel_stamped', True)
+        self.declare_parameter('cmd_vel_stamped', default_cmd_vel_stamped())
         self.declare_parameter('stop_rate_hz', 20.0)
         self.stamped = self.get_parameter('cmd_vel_stamped').value
         msg_type = TwistStamped if self.stamped else Twist

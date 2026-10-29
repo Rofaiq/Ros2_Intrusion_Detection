@@ -7,8 +7,12 @@ on:
 
 jobs:
   build-and-test:
-    runs-on: ubuntu-24.04
-    container: ros:jazzy
+    strategy:
+      fail-fast: false
+      matrix:
+        distro: [humble, jazzy]
+    runs-on: ubuntu-latest
+    container: ros:${{ matrix.distro }}
     defaults:
       run:
         shell: bash
@@ -20,16 +24,16 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          rosdep update --rosdistro jazzy
-          rosdep install --from-paths src --ignore-src -y --rosdistro jazzy
+          rosdep update --rosdistro ${{ matrix.distro }}
+          rosdep install --from-paths src --ignore-src -y --rosdistro ${{ matrix.distro }}
 
       - name: Build
         run: |
-          source /opt/ros/jazzy/setup.bash
+          source /opt/ros/${{ matrix.distro }}/setup.bash
           colcon build --event-handlers console_direct+
 
       - name: Test
         run: |
-          source /opt/ros/jazzy/setup.bash
+          source /opt/ros/${{ matrix.distro }}/setup.bash
           colcon test --event-handlers console_direct+
           colcon test-result --verbose

@@ -19,6 +19,8 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 
+from robot_ids.compat import default_cmd_vel_stamped
+
 ATTACKS = ('cmd_vel_spoof', 'scan_spoof', 'odom_replay', 'flood')
 
 
@@ -29,7 +31,7 @@ class AttackInjectorNode(Node):
         self.declare_parameter('attack', 'cmd_vel_spoof')
         self.declare_parameter('start_delay_s', 5.0)
         self.declare_parameter('duration_s', 20.0)
-        self.declare_parameter('cmd_vel_stamped', True)
+        self.declare_parameter('cmd_vel_stamped', default_cmd_vel_stamped())
         self.declare_parameter('spoof_linear', 0.2)
         self.declare_parameter('spoof_angular', 1.5)
         self.declare_parameter('phantom_wall_m', 0.4)

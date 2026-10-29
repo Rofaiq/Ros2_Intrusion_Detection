@@ -2,7 +2,6 @@
 ids_monitor:
   ros__parameters:
     cmd_vel_topic: /cmd_vel
-    cmd_vel_stamped: true          # TurtleBot3 on Jazzy uses TwistStamped
     odom_topic: /odom
     scan_topic: /scan
     allowed_cmd_vel_publishers: ["/safety_gate"]
