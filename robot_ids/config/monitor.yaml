@@ -15,5 +15,7 @@ ids_monitor:
     consistency_threshold: 0.15
     robot_max_speed: 0.5           # m/s, a little above the burger limit (0.22)
     robot_max_angular_speed: 3.0   # rad/s, burger limit is 2.84
+    startup_grace_s: 5.0           # ignore alerts while topics start up
+    event_min_interval_s: 1.0      # publish each kind of event at most once per second
     enabled_detectors: [rate, cmd_odom_consistency, scan_sanity, odom_replay,
                         publisher_allowlist, publisher_count]
