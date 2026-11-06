@@ -74,5 +74,8 @@ def summarize(results, baseline_s, false_alarms):
     lines += ['',
               f'Attack-free driving: {baseline_s / 60:.1f} min, '
               f'{len(false_alarms)} false alarm(s) ({rate:.1f} per hour)'
-              + (f'; caused by {cause_text}' if cause_text else '') + '.']
+              + (f'; caused by {cause_text}' if cause_text else '') + '.',
+              '',
+              'Delays are in simulation time. Gazebo Classic advances its clock in '
+              '0.1 s steps, so 0.00 s means detected within the same step.']
     return '\n'.join(lines)
