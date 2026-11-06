@@ -60,10 +60,20 @@ ros2 launch robot_ids sim.launch.py
 # Terminal 2: drive the robot through the gate
 ros2 run turtlebot3_teleop teleop_keyboard --ros-args -r cmd_vel:=cmd_vel_in
 
-# Terminal 3: attack, then watch the monitor stop the robot
+# Terminal 3: readable summary of detections (first event per detector)
+ros2 run robot_ids event_logger
+
+# Terminal 4: attack, then watch the monitor stop the robot
 ros2 launch robot_ids attack.launch.py attack:=cmd_vel_spoof
-ros2 topic echo /ids/events
+
+# Clear the alarm before the next attack
+ros2 service call /ids/reset std_srvs/srv/Trigger
 ```
+
+Every injection attack adds a publisher to a topic, so the graph checks
+catch it first. To see whether the data-based detectors (rates, physics and
+consistency checks) catch it too, start the simulation with
+`ros2 launch robot_ids sim.launch.py graph_checks:=false`.
 
 Run the tests with `colcon test --packages-select robot_ids && colcon test-result --verbose`.
 
