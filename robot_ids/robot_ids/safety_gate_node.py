@@ -13,6 +13,7 @@ on the topic (SROS2), which is a later stage of this project.
 
 from geometry_msgs.msg import Twist, TwistStamped
 import rclpy
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
@@ -34,7 +35,10 @@ class SafetyGateNode(Node):
         latched = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
                              reliability=ReliabilityPolicy.RELIABLE)
         self.create_subscription(Bool, '/ids/attack_detected', self.on_alarm, latched)
-        self.create_timer(1.0 / self.get_parameter('stop_rate_hz').value, self.on_timer)
+        # Wall-clock timer, so stop commands go out at the real rate even
+        # when /clock ticks slowly.
+        self.create_timer(1.0 / self.get_parameter('stop_rate_hz').value, self.on_timer,
+                          clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.blocked = False
 
     def on_cmd(self, msg):

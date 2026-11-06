@@ -15,6 +15,7 @@ Only run this against your own simulation.
 from geometry_msgs.msg import Twist, TwistStamped
 from nav_msgs.msg import Odometry
 import rclpy
+from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
@@ -26,8 +27,8 @@ ATTACKS = ('cmd_vel_spoof', 'scan_spoof', 'odom_replay', 'flood')
 
 class AttackInjectorNode(Node):
 
-    def __init__(self):
-        super().__init__('attack_injector')
+    def __init__(self, **kwargs):
+        super().__init__('attack_injector', **kwargs)
         self.declare_parameter('attack', 'cmd_vel_spoof')
         self.declare_parameter('start_delay_s', 5.0)
         self.declare_parameter('duration_s', 20.0)
@@ -61,7 +62,11 @@ class AttackInjectorNode(Node):
 
         rate = {'cmd_vel_spoof': 20.0, 'scan_spoof': 5.0, 'odom_replay': 30.0,
                 'flood': self.get_parameter('flood_hz').value}[self.attack]
-        self.create_timer(1.0 / rate, self.on_timer)
+        # Use the wall clock for the send rate. A timer on simulation time can
+        # only fire when /clock ticks (10 Hz in Gazebo Classic), which would
+        # silently cap every attack, including the 1 kHz flood, at 10 Hz.
+        self.create_timer(1.0 / rate, self.on_timer,
+                          clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.get_logger().info(f'Attack {self.attack} starts in {self.start_delay:.0f} s')
 
     def now(self):
