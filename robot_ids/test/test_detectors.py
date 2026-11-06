@@ -2,8 +2,9 @@
 
 import math
 
-from robot_ids.detectors import (CmdOdomConsistencyDetector, OdomReplayDetector,
-                                 RateDetector, ScanSanityDetector, check_publishers)
+from robot_ids.detectors import (CmdConflictDetector, CmdOdomConsistencyDetector,
+                                 OdomReplayDetector, RateDetector, ScanSanityDetector,
+                                 check_publishers)
 
 
 def feed_rate(detector, hz, start, seconds):
@@ -137,3 +138,23 @@ def test_publishers_allowlist():
 def test_publishers_count_without_allowlist():
     assert check_publishers('/scan', ['/bridge']) == []
     assert check_publishers('/scan', ['/bridge', '/x'])[0].detector == 'publisher_count'
+
+
+def test_conflict_quiet_for_smooth_teleop():
+    d = CmdConflictDetector()
+    alerts = []
+    v = w = 0.0
+    for i in range(100):  # operator ramps up speed in small steps at 10 Hz
+        v, w = min(v + 0.005, 0.22), min(w + 0.05, 1.0)
+        alerts += d.add_cmd(i * 0.1, v, w)
+    alerts += d.add_cmd(10.1, 0.0, 0.0)  # one emergency stop is fine
+    assert alerts == []
+
+
+def test_conflict_detects_interleaved_streams():
+    d = CmdConflictDetector()
+    alerts = []
+    for i in range(30):  # teleop (0.06, 0.6) and attacker (0.2, 1.5) interleaved
+        t = i * 0.033
+        alerts += d.add_cmd(t, *((0.06, 0.6) if i % 2 else (0.2, 1.5)))
+    assert alerts and alerts[0].detector == 'cmd_conflict'

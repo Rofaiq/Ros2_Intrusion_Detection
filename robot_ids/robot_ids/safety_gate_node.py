@@ -5,6 +5,12 @@ to ``cmd_vel`` while the alarm is clear. When the monitor latches
 ``/ids/attack_detected``, the gate drops all input and publishes zero
 velocity at a fixed rate so the robot stops.
 
+Restart interlock: clearing the alarm does not restart the robot by itself.
+Teleop and Nav2 keep re-sending their last command while blocked, so the
+gate waits for a stop command (all velocities zero, e.g. ``s`` in teleop)
+before forwarding motion again. Resetting a safety function should never
+start a machine on its own; an operator has to ask for motion again.
+
 Note: the gate cannot block an attacker that publishes straight to
 ``cmd_vel``. Its zero commands compete with the injected ones, which slows
 the attack but does not prevent it. Real prevention needs access control
@@ -21,11 +27,17 @@ from std_msgs.msg import Bool
 from robot_ids.compat import default_cmd_vel_stamped
 
 
+def is_stop(twist):
+    return all(v == 0.0 for v in (twist.linear.x, twist.linear.y, twist.linear.z,
+                                  twist.angular.x, twist.angular.y, twist.angular.z))
+
+
 class SafetyGateNode(Node):
 
-    def __init__(self):
-        super().__init__('safety_gate')
+    def __init__(self, **kwargs):
+        super().__init__('safety_gate', **kwargs)
         self.declare_parameter('cmd_vel_stamped', default_cmd_vel_stamped())
+        self.declare_parameter('require_stop_after_clear', True)
         self.declare_parameter('stop_rate_hz', 20.0)
         self.stamped = self.get_parameter('cmd_vel_stamped').value
         msg_type = TwistStamped if self.stamped else Twist
@@ -40,16 +52,27 @@ class SafetyGateNode(Node):
         self.create_timer(1.0 / self.get_parameter('stop_rate_hz').value, self.on_timer,
                           clock=Clock(clock_type=ClockType.STEADY_TIME))
         self.blocked = False
+        self.awaiting_stop = False
 
     def on_cmd(self, msg):
-        if not self.blocked:
-            self.pub.publish(msg)
+        if self.blocked:
+            return
+        if self.awaiting_stop:
+            if not is_stop(msg.twist if self.stamped else msg):
+                return
+            self.awaiting_stop = False
+            self.get_logger().info('Stop command received: forwarding commands again')
+        self.pub.publish(msg)
 
     def on_alarm(self, msg):
         if msg.data != self.blocked:
             self.blocked = msg.data
             if self.blocked:
                 self.get_logger().warn('Alarm raised: robot stopped, input blocked')
+            elif self.get_parameter('require_stop_after_clear').value:
+                self.awaiting_stop = True
+                self.get_logger().info('Alarm cleared: send a stop command (teleop: s) '
+                                       'before driving again')
             else:
                 self.get_logger().info('Alarm cleared: forwarding commands again')
             self.publish_stop()

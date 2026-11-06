@@ -66,6 +66,42 @@ class RateDetector:
         return []
 
 
+class CmdConflictDetector:
+    """Detect two sources writing to the same velocity topic.
+
+    A human or a planner changes the commanded velocity smoothly, but when an
+    attacker's stream is interleaved with the real one, consecutive commands
+    jump back and forth between two very different values many times a
+    second. Counting those jumps in a sliding window catches this even when
+    the robot's averaged motion hides it from the consistency check.
+    """
+
+    def __init__(self, topic='/cmd_vel', window_s=1.0, min_jumps=4,
+                 linear_jump=0.1, angular_jump=0.5):
+        self.topic = topic
+        self.window_s = window_s
+        self.min_jumps = min_jumps
+        self.linear_jump = linear_jump
+        self.angular_jump = angular_jump
+        self._prev = None  # (v, w)
+        self._jumps = deque()
+
+    def add_cmd(self, t, v, w):
+        if self._prev is not None:
+            pv, pw = self._prev
+            if abs(v - pv) > self.linear_jump or abs(w - pw) > self.angular_jump:
+                self._jumps.append(t)
+        self._prev = (v, w)
+        while self._jumps and t - self._jumps[0] > self.window_s:
+            self._jumps.popleft()
+        if len(self._jumps) >= self.min_jumps:
+            return [Alert('cmd_conflict', self.topic,
+                          f'command jumped {len(self._jumps)} times in '
+                          f'{self.window_s:.1f} s (competing publishers?)',
+                          len(self._jumps) / self.min_jumps)]
+        return []
+
+
 class CmdOdomConsistencyDetector:
     """Compare what the robot was told to do with what it actually did.
 

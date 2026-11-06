@@ -29,15 +29,17 @@ flowchart LR
   first alert. Reset it with `ros2 service call /ids/reset std_srvs/srv/Trigger`.
 * **`safety_gate`** is the only node meant to drive the robot. It forwards
   commands from `cmd_vel_in` and, once the alarm is raised, blocks them and
-  publishes zero velocity.
+  publishes zero velocity. After the alarm is cleared it waits for a stop
+  command (press `s` in teleop) before it forwards motion again, so a reset
+  never restarts the robot by itself.
 * **`attack_injector`** plays the attacker.
 
 | Attack | What the attacker does | Detected by |
 |---|---|---|
-| `cmd_vel_spoof` | Publishes its own velocity commands | unexpected publisher, command/odometry mismatch |
+| `cmd_vel_spoof` | Publishes its own velocity commands | unexpected publisher, competing command streams, command/odometry mismatch |
 | `scan_spoof` | Publishes fake LiDAR scans of a nearby wall | scan rate, scan discontinuity, publisher count |
 | `odom_replay` | Replays recorded odometry with old timestamps | stamps going backwards, impossible jumps |
-| `flood` | Sends commands at ~1 kHz (DoS) | message rate |
+| `flood` | Sends commands at ~1 kHz (DoS) | message rate, competing command streams |
 
 The detectors live in [`robot_ids/detectors.py`](robot_ids/robot_ids/detectors.py)
 and have no ROS imports, so they are unit-tested with plain pytest.
@@ -66,7 +68,7 @@ ros2 run robot_ids event_logger
 # Terminal 4: attack, then watch the monitor stop the robot
 ros2 launch robot_ids attack.launch.py attack:=cmd_vel_spoof
 
-# Clear the alarm before the next attack
+# Clear the alarm before the next attack, then press s in teleop to re-arm
 ros2 service call /ids/reset std_srvs/srv/Trigger
 ```
 

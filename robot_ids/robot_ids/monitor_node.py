@@ -20,8 +20,9 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
 from robot_ids.compat import default_cmd_vel_stamped
-from robot_ids.detectors import (CmdOdomConsistencyDetector, OdomReplayDetector,
-                                 RateDetector, ScanSanityDetector, check_publishers)
+from robot_ids.detectors import (CmdConflictDetector, CmdOdomConsistencyDetector,
+                                 OdomReplayDetector, RateDetector, ScanSanityDetector,
+                                 check_publishers)
 
 
 def stamp_to_sec(stamp):
@@ -52,7 +53,7 @@ class MonitorNode(Node):
         self.declare_parameter('startup_grace_s', 5.0)
         self.declare_parameter('event_min_interval_s', 1.0)
         self.declare_parameter('enabled_detectors',
-                               ['rate', 'cmd_odom_consistency', 'scan_sanity',
+                               ['rate', 'cmd_conflict', 'cmd_odom_consistency', 'scan_sanity',
                                 'odom_replay', 'publisher_allowlist', 'publisher_count'])
 
         p = lambda name: self.get_parameter(name).value  # noqa: E731
@@ -97,6 +98,7 @@ class MonitorNode(Node):
             self.odom_topic: RateDetector(self.odom_topic, p('odom_max_hz'), p('odom_min_hz')),
             self.scan_topic: RateDetector(self.scan_topic, p('scan_max_hz'), p('scan_min_hz')),
         }
+        self.conflict = CmdConflictDetector(self.cmd_topic)
         self.consistency = CmdOdomConsistencyDetector(
             self.cmd_topic, threshold=p('consistency_threshold'))
         self.scan_sanity = ScanSanityDetector(
@@ -138,6 +140,7 @@ class MonitorNode(Node):
             return
         self.rates[self.cmd_topic].add(t)
         self.consistency.add_cmd(t, twist.linear.x, twist.angular.z)
+        self.report(self.conflict.add_cmd(t, twist.linear.x, twist.angular.z))
 
     def on_odom(self, msg):
         t = self.now()
