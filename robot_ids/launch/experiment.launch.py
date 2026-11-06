@@ -18,6 +18,7 @@ from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -27,9 +28,11 @@ def generate_launch_description():
         package='robot_ids',
         executable='experiment',
         name='ids_experiment',
+        # Launch arguments are strings; '60' would become an int parameter
+        # and crash a node that declared baseline_s as a float.
         parameters=[{
-            'trials': LaunchConfiguration('trials'),
-            'baseline_s': LaunchConfiguration('baseline_s'),
+            'trials': ParameterValue(LaunchConfiguration('trials'), value_type=int),
+            'baseline_s': ParameterValue(LaunchConfiguration('baseline_s'), value_type=float),
         }],
         output='screen',
     )

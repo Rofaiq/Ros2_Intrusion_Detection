@@ -8,6 +8,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def generate_launch_description():
@@ -22,8 +23,11 @@ def generate_launch_description():
             parameters=[{
                 'use_sim_time': True,
                 'attack': LaunchConfiguration('attack'),
-                'start_delay_s': LaunchConfiguration('start_delay_s'),
-                'duration_s': LaunchConfiguration('duration_s'),
+                # Typed, so start_delay_s:=5 works as well as 5.0.
+                'start_delay_s': ParameterValue(LaunchConfiguration('start_delay_s'),
+                                                value_type=float),
+                'duration_s': ParameterValue(LaunchConfiguration('duration_s'),
+                                             value_type=float),
             }],
             output='screen',
         ),
