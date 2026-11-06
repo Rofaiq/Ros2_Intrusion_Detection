@@ -79,6 +79,23 @@ consistency checks) catch it too, start the simulation with
 
 Run the tests with `colcon test --packages-select robot_ids && colcon test-result --verbose`.
 
+## Measuring detection
+
+One command runs the whole experiment: a scripted driver wanders around the
+world while every attack is launched 10 times (each as its own process, as a
+real attacker would), after 5 minutes of attack-free driving to count false
+alarms.
+
+```bash
+ros2 launch robot_ids experiment.launch.py                     # all detectors
+ros2 launch robot_ids experiment.launch.py graph_checks:=false # data-based detectors only
+```
+
+It takes about 25 minutes and writes `summary.md`, `trials.csv` and
+`events.csv` to `~/ids_results/<date-time>/`. The attack injector publishes
+ground truth on `/ids/attack_truth`, so detection delays are measured from
+the moment each attack really starts.
+
 ## Limitations
 
 Detection is not prevention. An attacker publishing directly on `/cmd_vel`
@@ -89,7 +106,8 @@ the roadmap below.
 ## Roadmap
 
 - [x] Attack injector, rule-based detectors, latched alarm and safety gate
-- [ ] Measure detection rate, false alarms and time-to-detect for each attack
+- [x] Experiment runner: detection rate, false alarms and time-to-detect
+- [ ] Publish measured results here
 - [ ] Record labelled datasets and train an MLP / autoencoder detector
 - [ ] Autonomous navigation with Nav2 during attacks
 - [ ] SROS2 access control, and a comparison of detection vs. prevention

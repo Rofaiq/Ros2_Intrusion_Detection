@@ -27,6 +27,8 @@ setup(
             'safety_gate = robot_ids.safety_gate_node:main',
             'attack_injector = robot_ids.attack_injector_node:main',
             'event_logger = robot_ids.event_logger_node:main',
+            'driver = robot_ids.driver_node:main',
+            'experiment = robot_ids.experiment_node:main',
         ],
     },
 )

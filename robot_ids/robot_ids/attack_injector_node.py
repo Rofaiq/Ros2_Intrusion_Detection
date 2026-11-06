@@ -12,6 +12,8 @@ domain ID can publish to any topic. This node uses that to run one attack:
 Only run this against your own simulation.
 """
 
+import json
+
 from geometry_msgs.msg import Twist, TwistStamped
 from nav_msgs.msg import Odometry
 import rclpy
@@ -19,6 +21,7 @@ from rclpy.clock import Clock, ClockType
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
+from std_msgs.msg import String
 
 from robot_ids.compat import default_cmd_vel_stamped
 
@@ -55,6 +58,9 @@ class AttackInjectorNode(Node):
         # measured from the real start of the attack.
         self.pub = None
         self.finished = False
+        # Ground truth for experiments and datasets: when the attack really
+        # started and ended, in the same (simulation) time as /ids/events.
+        self.truth_pub = self.create_publisher(String, '/ids/attack_truth', 10)
         if self.attack == 'scan_spoof':
             self.create_subscription(LaserScan, '/scan', self.on_scan, qos_profile_sensor_data)
         elif self.attack == 'odom_replay':
@@ -111,12 +117,18 @@ class AttackInjectorNode(Node):
                 self.destroy_publisher(self.pub)
                 self.pub = None
                 self.finished = True
+                self.publish_truth('end')
                 self.get_logger().info(f'Attack {self.attack} finished')
             return
         if self.pub is None:
             self.pub = self.create_attack_publisher()
+            self.publish_truth('start')
             self.get_logger().warn(f'Attack {self.attack} running')
         getattr(self, 'send_' + self.attack)()
+
+    def publish_truth(self, state):
+        self.truth_pub.publish(String(data=json.dumps(
+            {'attack': self.attack, 'state': state, 't': round(self.now(), 3)})))
 
     def twist_msg(self, linear, angular):
         if self.stamped:
