@@ -8,8 +8,9 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 
 
 def generate_launch_description():
@@ -22,7 +23,13 @@ def generate_launch_description():
                               'launch', 'ids.launch.py')
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'graph_checks', default_value='true',
+            description='false: ignore unexpected publishers and test the other detectors'),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(tb3_launch)),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(ids_launch),
-                                 launch_arguments={'use_sim_time': 'true'}.items()),
+                                 launch_arguments={
+                                     'use_sim_time': 'true',
+                                     'graph_checks': LaunchConfiguration('graph_checks'),
+                                 }.items()),
     ])

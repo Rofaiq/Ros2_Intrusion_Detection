@@ -106,3 +106,36 @@ def test_quiet_during_normal_driving_then_detects_spoofed_publisher(ros):
 
     for node in (monitor, robot_node, driver, attacker):
         node.destroy_node()
+
+
+def test_consistency_detector_catches_spoofed_commands_without_graph_checks(ros):
+    monitor = MonitorNode(parameter_overrides=[
+        Parameter('startup_grace_s', value=1.0),
+        Parameter('graph_checks', value=False)])
+    robot_node = rclpy.create_node('fake_robot')
+    driver = rclpy.create_node('safety_gate')
+    attacker = rclpy.create_node('attacker')
+    FakeRobot(robot_node, driver)
+
+    executor = SingleThreadedExecutor()
+    for node in (monitor, robot_node, driver, attacker):
+        executor.add_node(node)
+
+    spin_for(executor, 3.0)
+    assert not monitor.attack_detected, 'false alarm during normal driving'
+
+    # The attacker commands a spin that the (fake) robot never performs.
+    stamped = default_cmd_vel_stamped()
+    pub = attacker.create_publisher(TwistStamped if stamped else Twist, '/cmd_vel', 10)
+
+    def spoof():
+        msg = TwistStamped() if stamped else Twist()
+        (msg.twist if stamped else msg).angular.z = 1.5
+        pub.publish(msg)
+
+    attacker.create_timer(1.0 / 20.0, spoof)
+    spin_for(executor, 3.0)
+    assert monitor.attack_detected, 'spoofed commands were not detected'
+
+    for node in (monitor, robot_node, driver, attacker):
+        node.destroy_node()

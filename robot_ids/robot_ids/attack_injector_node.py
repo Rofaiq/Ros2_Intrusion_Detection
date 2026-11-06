@@ -49,21 +49,20 @@ class AttackInjectorNode(Node):
         self.recorded = []
         self.replay_index = 0
 
-        if self.attack in ('cmd_vel_spoof', 'flood'):
-            msg_type = TwistStamped if self.stamped else Twist
-            self.pub = self.create_publisher(msg_type, '/cmd_vel', 10)
-        elif self.attack == 'scan_spoof':
-            self.pub = self.create_publisher(LaserScan, '/scan', qos_profile_sensor_data)
+        # The attacker only advertises its publisher when the attack starts
+        # and removes it when the attack ends, so the detection delay is
+        # measured from the real start of the attack.
+        self.pub = None
+        self.finished = False
+        if self.attack == 'scan_spoof':
             self.create_subscription(LaserScan, '/scan', self.on_scan, qos_profile_sensor_data)
-        else:
-            self.pub = self.create_publisher(Odometry, '/odom', 10)
+        elif self.attack == 'odom_replay':
             self.create_subscription(Odometry, '/odom', self.on_odom, 10)
 
         rate = {'cmd_vel_spoof': 20.0, 'scan_spoof': 5.0, 'odom_replay': 30.0,
                 'flood': self.get_parameter('flood_hz').value}[self.attack]
         self.create_timer(1.0 / rate, self.on_timer)
         self.get_logger().info(f'Attack {self.attack} starts in {self.start_delay:.0f} s')
-        self.announced = False
 
     def now(self):
         return self.get_clock().now().nanoseconds * 1e-9
@@ -91,12 +90,27 @@ class AttackInjectorNode(Node):
         if self.now() < self.t0 + self.start_delay and len(self.recorded) < 10000:
             self.recorded.append(msg)
 
+    def create_attack_publisher(self):
+        if self.attack in ('cmd_vel_spoof', 'flood'):
+            msg_type = TwistStamped if self.stamped else Twist
+            return self.create_publisher(msg_type, '/cmd_vel', 10)
+        if self.attack == 'scan_spoof':
+            return self.create_publisher(LaserScan, '/scan', qos_profile_sensor_data)
+        return self.create_publisher(Odometry, '/odom', 10)
+
     def on_timer(self):
-        if not self.active():
+        if self.finished:
             return
-        if not self.announced:
+        if not self.active():
+            if self.pub is not None:
+                self.destroy_publisher(self.pub)
+                self.pub = None
+                self.finished = True
+                self.get_logger().info(f'Attack {self.attack} finished')
+            return
+        if self.pub is None:
+            self.pub = self.create_attack_publisher()
             self.get_logger().warn(f'Attack {self.attack} running')
-            self.announced = True
         getattr(self, 'send_' + self.attack)()
 
     def twist_msg(self, linear, angular):

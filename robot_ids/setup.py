@@ -26,6 +26,7 @@ setup(
             'monitor = robot_ids.monitor_node:main',
             'safety_gate = robot_ids.safety_gate_node:main',
             'attack_injector = robot_ids.attack_injector_node:main',
+            'event_logger = robot_ids.event_logger_node:main',
         ],
     },
 )

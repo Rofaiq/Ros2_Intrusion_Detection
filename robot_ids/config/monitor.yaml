@@ -17,5 +17,6 @@ ids_monitor:
     robot_max_angular_speed: 3.0   # rad/s, burger limit is 2.84
     startup_grace_s: 5.0           # ignore alerts while topics start up
     event_min_interval_s: 1.0      # publish each kind of event at most once per second
+    graph_checks: true             # false: test the data-based detectors on their own
     enabled_detectors: [rate, cmd_odom_consistency, scan_sanity, odom_replay,
                         publisher_allowlist, publisher_count]

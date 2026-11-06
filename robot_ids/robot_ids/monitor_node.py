@@ -48,6 +48,7 @@ class MonitorNode(Node):
         self.declare_parameter('consistency_threshold', 0.15)
         self.declare_parameter('robot_max_speed', 0.5)
         self.declare_parameter('robot_max_angular_speed', 3.0)
+        self.declare_parameter('graph_checks', True)
         self.declare_parameter('startup_grace_s', 5.0)
         self.declare_parameter('event_min_interval_s', 1.0)
         self.declare_parameter('enabled_detectors',
@@ -61,6 +62,10 @@ class MonitorNode(Node):
         self.allowed_cmd_pubs = list(p('allowed_cmd_vel_publishers'))
         self.max_pubs = p('max_publishers_per_topic')
         self.enabled = set(p('enabled_detectors'))
+        if not p('graph_checks'):
+            # Lets you test the data-based detectors on their own: with graph
+            # checks on, every injection attack is caught by its publisher.
+            self.enabled -= {'publisher_allowlist', 'publisher_count'}
         self.startup_grace = p('startup_grace_s')
         self.event_interval = p('event_min_interval_s')
         self.reset_detectors()

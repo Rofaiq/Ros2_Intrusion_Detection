@@ -15,11 +15,15 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('use_sim_time', default_value='true'),
+        DeclareLaunchArgument(
+            'graph_checks', default_value='true',
+            description='false: ignore unexpected publishers and test the other detectors'),
         Node(
             package='robot_ids',
             executable='monitor',
             name='ids_monitor',
-            parameters=[config, {'use_sim_time': use_sim_time}],
+            parameters=[config, {'use_sim_time': use_sim_time,
+                                 'graph_checks': LaunchConfiguration('graph_checks')}],
             output='screen',
         ),
         Node(
