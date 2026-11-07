@@ -42,11 +42,28 @@ def score_trial(attack, trial, start, end, events, post_s=2.0):
     return result
 
 
-def summarize(results, baseline_s, false_alarms):
+def trial_over(now, launched, truth, start_delay, duration, post_s, margin=5.0):
+    """Has an attack trial finished, in simulation time?
+
+    ``launched`` is when the attacker process was started and ``truth`` holds
+    the ``start`` and ``end`` times it reported. A trial normally ends
+    ``post_s`` after the reported end, so late detections still count. If the
+    attacker never reports, the trial gives up ``margin`` seconds after the
+    attack should have finished.
+    """
+    if 'end' in truth:
+        return now >= truth['end'] + post_s
+    if 'start' in truth:
+        return now >= truth['start'] + duration + post_s + margin
+    return now >= launched + start_delay + duration + post_s + margin
+
+
+def summarize(results, baseline_s, false_alarms, real_time_factor=None):
     """Markdown report: one row per attack, plus the false-alarm rate.
 
     ``false_alarms`` is a list of event dicts that raised an alarm during
-    attack-free driving.
+    attack-free driving. ``real_time_factor`` is how fast the simulation
+    ran compared to the wall clock, if it was measured.
     """
     lines = ['| Attack | Detected | Median delay | Worst delay | Detectors that fired |',
              '|---|---|---|---|---|']
@@ -65,17 +82,22 @@ def summarize(results, baseline_s, false_alarms):
             f"| {f'{statistics.median(delays):.2f} s' if delays else '-'} "
             f"| {f'{max(delays):.2f} s' if delays else '-'} "
             f'| {detectors or "-"} |')
+    not_started = sum(1 for r in results if r.start is None)
     hours = baseline_s / 3600.0
     rate = len(false_alarms) / hours if hours > 0 else float('nan')
     causes = {}
     for e in false_alarms:
         causes[e['detector']] = causes.get(e['detector'], 0) + 1
     cause_text = ', '.join(f'{d} ({n})' for d, n in sorted(causes.items(), key=lambda x: -x[1]))
+    if not_started:
+        lines += ['', f'{not_started} trial(s) left out because the attack never started.']
     lines += ['',
               f'Attack-free driving: {baseline_s / 60:.1f} min, '
               f'{len(false_alarms)} false alarm(s) ({rate:.1f} per hour)'
               + (f'; caused by {cause_text}' if cause_text else '') + '.',
               '',
-              'Delays are in simulation time. Gazebo Classic advances its clock in '
+              'Times are in simulation time. Gazebo Classic advances its clock in '
               '0.1 s steps, so 0.00 s means detected within the same step.']
+    if real_time_factor is not None:
+        lines[-1] += f' The simulation ran at {real_time_factor:.2f}x real time.'
     return '\n'.join(lines)

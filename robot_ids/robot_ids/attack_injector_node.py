@@ -13,11 +13,13 @@ Only run this against your own simulation.
 """
 
 import json
+import time
 
 from geometry_msgs.msg import Twist, TwistStamped
 from nav_msgs.msg import Odometry
 import rclpy
 from rclpy.clock import Clock, ClockType
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
@@ -40,6 +42,9 @@ class AttackInjectorNode(Node):
         self.declare_parameter('spoof_angular', 1.5)
         self.declare_parameter('phantom_wall_m', 0.4)
         self.declare_parameter('flood_hz', 1000.0)
+        # Copied into the ground-truth messages so an experiment can tell
+        # this run's messages apart from any other attacker's.
+        self.declare_parameter('run_id', '')
 
         self.attack = self.get_parameter('attack').value
         if self.attack not in ATTACKS:
@@ -58,6 +63,7 @@ class AttackInjectorNode(Node):
         # measured from the real start of the attack.
         self.pub = None
         self.finished = False
+        self.finished_at = None  # wall-clock time, see done()
         # Ground truth for experiments and datasets: when the attack really
         # started and ended, in the same (simulation) time as /ids/events.
         self.truth_pub = self.create_publisher(String, '/ids/attack_truth', 10)
@@ -89,6 +95,13 @@ class AttackInjectorNode(Node):
         elapsed = self.now() - self.t0 - self.start_delay
         return elapsed >= 0.0 and (self.duration <= 0.0 or elapsed < self.duration)
 
+    def done(self):
+        """True a moment after the attack ended, so the process can exit.
+
+        The short wait gives the last ground-truth message time to go out.
+        """
+        return self.finished and time.monotonic() - self.finished_at > 1.0
+
     def on_scan(self, msg):
         # Our own spoofed scans also arrive here; keep only real ones.
         wall = self.get_parameter('phantom_wall_m').value
@@ -109,15 +122,24 @@ class AttackInjectorNode(Node):
             return self.create_publisher(LaserScan, '/scan', qos_profile_sensor_data)
         return self.create_publisher(Odometry, '/odom', 10)
 
+    def stop(self, state):
+        if self.pub is not None:
+            self.destroy_publisher(self.pub)
+            self.pub = None
+        self.finished = True
+        self.finished_at = time.monotonic()
+        self.publish_truth(state)
+
     def on_timer(self):
         if self.finished:
             return
+        if self.t0 is not None and self.now() < self.t0 - 1.0:
+            self.get_logger().warn('Clock jumped backwards (simulation restarted): stopping')
+            self.stop('aborted')
+            return
         if not self.active():
             if self.pub is not None:
-                self.destroy_publisher(self.pub)
-                self.pub = None
-                self.finished = True
-                self.publish_truth('end')
+                self.stop('end')
                 self.get_logger().info(f'Attack {self.attack} finished')
             return
         if self.pub is None:
@@ -128,7 +150,8 @@ class AttackInjectorNode(Node):
 
     def publish_truth(self, state):
         self.truth_pub.publish(String(data=json.dumps(
-            {'attack': self.attack, 'state': state, 't': round(self.now(), 3)})))
+            {'attack': self.attack, 'state': state, 't': round(self.now(), 3),
+             'run': self.get_parameter('run_id').value})))
 
     def twist_msg(self, linear, angular):
         if self.stamped:
@@ -171,8 +194,11 @@ def main(args=None):
     rclpy.init(args=args)
     node = AttackInjectorNode()
     try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
+        # Exit once the attack is over, so a forgotten attacker cannot keep
+        # running in the background and spoil later experiments.
+        while rclpy.ok() and not node.done():
+            rclpy.spin_once(node, timeout_sec=0.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

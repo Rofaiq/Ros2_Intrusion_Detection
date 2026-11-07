@@ -8,6 +8,7 @@ called.
 """
 
 import json
+import time
 
 from geometry_msgs.msg import Twist, TwistStamped
 from nav_msgs.msg import Odometry
@@ -138,7 +139,10 @@ class MonitorNode(Node):
         t = self.now()
         if t is None:
             return
-        self.rates[self.cmd_topic].add(t)
+        # Commands are sent by software on wall-clock timers, so their rate
+        # is measured on the wall clock. Measured in simulation time, a 10 Hz
+        # sender looks like 25 Hz when the simulation runs at 0.4x real time.
+        self.rates[self.cmd_topic].add(time.monotonic())
         self.consistency.add_cmd(t, twist.linear.x, twist.angular.z)
         self.report(self.conflict.add_cmd(t, twist.linear.x, twist.angular.z))
 
@@ -165,8 +169,8 @@ class MonitorNode(Node):
         t = self.now()
         if t is None:
             return
-        for detector in self.rates.values():
-            self.report(detector.check(t))
+        for topic, detector in self.rates.items():
+            self.report(detector.check(time.monotonic() if topic == self.cmd_topic else t))
         for topic in (self.cmd_topic, self.odom_topic, self.scan_topic):
             names = [self.qualified(i.node_namespace, i.node_name)
                      for i in self.get_publishers_info_by_topic(topic)]

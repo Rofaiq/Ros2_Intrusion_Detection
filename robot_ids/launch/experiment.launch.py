@@ -31,6 +31,7 @@ def generate_launch_description():
         # Launch arguments are strings; '60' would become an int parameter
         # and crash a node that declared baseline_s as a float.
         parameters=[{
+            'use_sim_time': True,
             'trials': ParameterValue(LaunchConfiguration('trials'), value_type=int),
             'baseline_s': ParameterValue(LaunchConfiguration('baseline_s'), value_type=float),
         }],

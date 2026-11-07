@@ -63,3 +63,26 @@ def test_ros_modules_import():
     pytest.importorskip('rclpy')
     for name in ('driver_node', 'experiment_node', 'event_logger_node'):
         importlib.import_module(f'robot_ids.{name}')
+
+
+def test_trial_over_follows_ground_truth():
+    from robot_ids.experiment import trial_over
+    args = dict(start_delay=3.0, duration=10.0, post_s=2.0, margin=5.0)
+    # Normal trial: ends post_s after the attacker reports the end.
+    assert not trial_over(114.0, 100.0, {'start': 103.0, 'end': 113.0}, **args)
+    assert trial_over(115.0, 100.0, {'start': 103.0, 'end': 113.0}, **args)
+    # Started but the end was never reported: give up after a margin.
+    assert not trial_over(119.0, 100.0, {'start': 103.0}, **args)
+    assert trial_over(120.0, 100.0, {'start': 103.0}, **args)
+    # Never started.
+    assert not trial_over(119.0, 100.0, {}, **args)
+    assert trial_over(120.0, 100.0, {}, **args)
+
+
+def test_summary_reports_skipped_trials_and_speed():
+    results = [score_trial('flood', 0, 10.0, 15.0, [ev(10.0)]),
+               score_trial('flood', 1, None, None, [])]
+    text = summarize(results, baseline_s=60.0, false_alarms=[], real_time_factor=0.43)
+    assert '| `flood` | 1/1 |' in text
+    assert '1 trial(s) left out because the attack never started.' in text
+    assert '0.43x real time' in text

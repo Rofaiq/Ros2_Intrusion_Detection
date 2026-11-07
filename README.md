@@ -91,10 +91,15 @@ ros2 launch robot_ids experiment.launch.py                     # all detectors
 ros2 launch robot_ids experiment.launch.py graph_checks:=false # data-based detectors only
 ```
 
-It takes about 25 minutes and writes `summary.md`, `trials.csv` and
-`events.csv` to `~/ids_results/<date-time>/`. The attack injector publishes
-ground truth on `/ids/attack_truth`, so detection delays are measured from
-the moment each attack really starts.
+It takes about 25 minutes of simulation time and writes `summary.md`,
+`trials.csv` and `events.csv` to `~/ids_results/<date-time>/`. Every phase is
+timed in simulation time, so on a slower computer, where Gazebo runs below
+real time, the run takes longer but measures the same thing; the summary
+reports the real-time factor. The attack injector publishes ground truth on
+`/ids/attack_truth`, tagged with its trial, so detection delays are measured
+from the moment each attack really starts. Each attacker exits when its
+attack ends, and the runner refuses to start while attackers from an earlier
+run are still alive (`pkill -f attack_injector` clears them).
 
 ## Limitations
 
