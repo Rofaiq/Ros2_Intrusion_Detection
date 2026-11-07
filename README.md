@@ -101,6 +101,30 @@ from the moment each attack really starts. Each attacker exits when its
 attack ends, and the runner refuses to start while attackers from an earlier
 run are still alive (`pkill -f attack_injector` clears them).
 
+### Results
+
+All detectors enabled, TurtleBot3 burger in `turtlebot3_world` on ROS 2 Humble
+and Gazebo Classic (laptop, simulation at 0.99x real time), 10 trials per
+attack:
+
+| Attack | Detected | Median delay | Worst delay | Detectors that fired |
+|---|---|---|---|---|
+| `cmd_vel_spoof` | 10/10 | 0.10 s | 0.10 s | cmd_conflict (10/10), cmd_odom_consistency (10/10), publisher_allowlist (10/10), publisher_count (10/10) |
+| `flood` | 10/10 | 0.10 s | 0.10 s | rate (10/10), publisher_allowlist (10/10), publisher_count (10/10), cmd_conflict (7/10) |
+| `odom_replay` | 10/10 | 0.00 s | 0.00 s | odom_replay (10/10), publisher_count (10/10), rate (10/10), cmd_odom_consistency (4/10) |
+| `scan_spoof` | 10/10 | 0.00 s | 0.00 s | scan_sanity (10/10), publisher_count (10/10), rate (10/10) |
+
+No false alarms in 5 minutes of attack-free driving. Delays are in simulation
+time, which Gazebo Classic advances in 0.1 s steps, so 0.00 s means detected
+within the same step.
+
+How to read this: every attack adds a publisher, so the graph checks
+(`publisher_allowlist`, `publisher_count`) fire on every trial and make this
+the easy case. The more telling column is which data-based detectors also
+fired. An attacker who replaces the legitimate node instead of adding one
+would only face those. Five minutes of normal driving is also too short to
+claim a low false-alarm rate; longer baselines are on the roadmap.
+
 ## Limitations
 
 Detection is not prevention. An attacker publishing directly on `/cmd_vel`
@@ -112,7 +136,8 @@ the roadmap below.
 
 - [x] Attack injector, rule-based detectors, latched alarm and safety gate
 - [x] Experiment runner: detection rate, false alarms and time-to-detect
-- [ ] Publish measured results here
+- [x] Publish measured results here
+- [ ] Results with the graph checks off, and a longer attack-free baseline
 - [ ] Record labelled datasets and train an MLP / autoencoder detector
 - [ ] Autonomous navigation with Nav2 during attacks
 - [ ] SROS2 access control, and a comparison of detection vs. prevention
