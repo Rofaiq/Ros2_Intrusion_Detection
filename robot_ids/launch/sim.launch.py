@@ -26,10 +26,15 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'graph_checks', default_value='true',
             description='false: ignore unexpected publishers and test the other detectors'),
+        DeclareLaunchArgument('detectors', default_value='rules',
+                              description='rules, learned, all or none'),
+        DeclareLaunchArgument('model', default_value='~/ids_models/model.json'),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(tb3_launch)),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(ids_launch),
                                  launch_arguments={
                                      'use_sim_time': 'true',
                                      'graph_checks': LaunchConfiguration('graph_checks'),
+                                     'detectors': LaunchConfiguration('detectors'),
+                                     'model': LaunchConfiguration('model'),
                                  }.items()),
     ])

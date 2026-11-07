@@ -3,6 +3,11 @@
   ros2 launch robot_ids experiment.launch.py
   ros2 launch robot_ids experiment.launch.py graph_checks:=false trials:=5 baseline_s:=120
 
+Record training data for the learned detectors (no alarms, labelled
+feature windows in features.csv), then test the trained models:
+  ros2 launch robot_ids experiment.launch.py detectors:=none record:=true baseline_s:=600
+  ros2 launch robot_ids experiment.launch.py detectors:=learned graph_checks:=false
+
 Starts the simulation, monitor and gate, a scripted driver, and the
 experiment runner; everything shuts down when the runner is finished.
 """
@@ -34,6 +39,7 @@ def generate_launch_description():
             'use_sim_time': True,
             'trials': ParameterValue(LaunchConfiguration('trials'), value_type=int),
             'baseline_s': ParameterValue(LaunchConfiguration('baseline_s'), value_type=float),
+            'record_features': ParameterValue(LaunchConfiguration('record'), value_type=bool),
         }],
         output='screen',
     )
@@ -41,9 +47,16 @@ def generate_launch_description():
         DeclareLaunchArgument('graph_checks', default_value='true'),
         DeclareLaunchArgument('trials', default_value='10'),
         DeclareLaunchArgument('baseline_s', default_value='300.0'),
+        DeclareLaunchArgument('detectors', default_value='rules',
+                              description='rules, learned, all or none'),
+        DeclareLaunchArgument('model', default_value='~/ids_models/model.json'),
+        DeclareLaunchArgument('record', default_value='false',
+                              description='true: save labelled feature windows'),
         IncludeLaunchDescription(PythonLaunchDescriptionSource(sim_launch),
                                  launch_arguments={
                                      'graph_checks': LaunchConfiguration('graph_checks'),
+                                     'detectors': LaunchConfiguration('detectors'),
+                                     'model': LaunchConfiguration('model'),
                                  }.items()),
         Node(
             package='robot_ids',

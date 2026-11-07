@@ -18,12 +18,20 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'graph_checks', default_value='true',
             description='false: ignore unexpected publishers and test the other detectors'),
+        DeclareLaunchArgument(
+            'detectors', default_value='rules',
+            description='which detectors may raise the alarm: rules, learned, all or none'),
+        DeclareLaunchArgument(
+            'model', default_value='~/ids_models/model.json',
+            description='trained model file for the learned detectors'),
         Node(
             package='robot_ids',
             executable='monitor',
             name='ids_monitor',
             parameters=[config, {'use_sim_time': use_sim_time,
-                                 'graph_checks': LaunchConfiguration('graph_checks')}],
+                                 'graph_checks': LaunchConfiguration('graph_checks'),
+                                 'detector_set': LaunchConfiguration('detectors'),
+                                 'learned_model_path': LaunchConfiguration('model')}],
             output='screen',
         ),
         Node(

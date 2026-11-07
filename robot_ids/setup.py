@@ -29,6 +29,7 @@ setup(
             'event_logger = robot_ids.event_logger_node:main',
             'driver = robot_ids.driver_node:main',
             'experiment = robot_ids.experiment_node:main',
+            'train_detector = robot_ids.train:main',
         ],
     },
 )

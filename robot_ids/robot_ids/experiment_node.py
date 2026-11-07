@@ -7,11 +7,15 @@ alarms, then runs each attack ``trials`` times in round-robin order. Each
 attack runs as a separate ``attack_injector`` process, as a real attacker
 would. All phases are timed in simulation time, so the experiment gives the
 same results on a slow computer, where Gazebo runs below real time; it just
-takes longer. Results go to ``~/ids_results/<date-time>/``:
+takes longer. With ``record_features`` it also saves every feature window from the monitor,
+labelled with the attack running at the time, as training data for the
+learned detectors (run the monitor with ``detector_set: none`` so the robot
+keeps driving during attacks). Results go to ``~/ids_results/<date-time>/``:
 
 * ``summary.md``: the results table, ready to paste into the README;
 * ``trials.csv``: one row per attack trial;
-* ``events.csv``: every monitor event, labelled with phase and trial.
+* ``events.csv``: every monitor event, labelled with phase and trial;
+* ``features.csv``: labelled feature windows (only with ``record_features``).
 """
 
 import csv
@@ -31,7 +35,8 @@ from std_msgs.msg import String
 from std_srvs.srv import Trigger
 
 from robot_ids.attack_injector_node import ATTACKS
-from robot_ids.experiment import score_trial, summarize, trial_over
+from robot_ids.experiment import label_windows, score_trial, summarize, trial_over
+from robot_ids.features import FEATURES
 
 
 class ExperimentNode(Node):
@@ -48,6 +53,7 @@ class ExperimentNode(Node):
         # Wall-clock limit per trial, in case the simulation freezes.
         self.declare_parameter('trial_timeout_s', 300.0)
         self.declare_parameter('output_dir', '~/ids_results')
+        self.declare_parameter('record_features', False)
         p = lambda name: self.get_parameter(name).value  # noqa: E731
         self.p = p
 
@@ -72,6 +78,9 @@ class ExperimentNode(Node):
         self.real_time_factor = None
 
         self.create_subscription(String, '/ids/events', self.on_event, 100)
+        self.windows = []  # feature windows, when recording
+        if p('record_features'):
+            self.create_subscription(String, '/ids/features', self.on_features, 100)
         self.create_subscription(String, '/ids/attack_truth', self.on_truth, 10)
         self.create_subscription(Odometry, '/odom', self.on_odom, 10)
         self.reset_client = self.create_client(Trigger, '/ids/reset')
@@ -104,6 +113,12 @@ class ExperimentNode(Node):
                                    f"{e['message']}")
             self.reset_alarm()
             self.ignore_until = now + self.p('settle_s')
+
+    def on_features(self, msg):
+        w = json.loads(msg.data)
+        w['phase'] = self.phase
+        w['trial'] = '' if self.trial is None else f'{self.trial[0]}#{self.trial[1]}'
+        self.windows.append(w)
 
     def on_odom(self, msg):
         # Gazebo can take a while to start; begin on the first odometry
@@ -202,6 +217,8 @@ class ExperimentNode(Node):
         self.results.append(result)
         if result.start is None:
             self.get_logger().error('  attack never started (check the injector)')
+        elif self.p('record_features'):
+            self.get_logger().info('  recorded')
         elif result.detected:
             self.get_logger().info(f'  detected after {result.first_delay:.2f} s by '
                                    f'{", ".join(result.detector_delays)}')
@@ -253,6 +270,8 @@ class ExperimentNode(Node):
                 w.writerow([r.attack, r.trial, r.start, r.end, r.detected,
                             '' if r.first_delay is None else round(r.first_delay, 3),
                             json.dumps({k: round(v, 3) for k, v in r.detector_delays.items()})])
+        if self.p('record_features'):
+            self.write_features()
         summary = summarize(self.results, self.baseline_s, self.false_alarms,
                             self.real_time_factor)
         with open(os.path.join(self.out_dir, 'summary.md'), 'w') as f:
@@ -260,6 +279,21 @@ class ExperimentNode(Node):
         self.get_logger().info('\n' + summary)
         self.get_logger().info(f'Results written to {self.out_dir}')
         raise SystemExit(0)
+
+    def write_features(self):
+        rows = label_windows(self.windows, self.results, self.p('duration_s'))
+        path = os.path.join(self.out_dir, 'features.csv')
+        with open(path, 'w', newline='') as f:
+            w = csv.writer(f)
+            w.writerow(['t', 'phase', 'trial', 'label', 'attack_start'] + list(FEATURES))
+            for r in rows:
+                w.writerow([r['t'], r['phase'], r['trial'], r['label'],
+                            '' if r['attack_start'] is None else r['attack_start']]
+                           + [r['features'].get(name, 0.0) for name in FEATURES])
+        counts = {}
+        for r in rows:
+            counts[r['label']] = counts.get(r['label'], 0) + 1
+        self.get_logger().info(f'Recorded {len(rows)} feature windows to {path}: {counts}')
 
 
 def main(args=None):

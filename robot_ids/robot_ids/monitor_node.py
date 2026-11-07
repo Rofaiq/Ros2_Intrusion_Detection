@@ -8,6 +8,7 @@ called.
 """
 
 import json
+import os
 import time
 
 from geometry_msgs.msg import Twist, TwistStamped
@@ -21,6 +22,7 @@ from std_msgs.msg import Bool, String
 from std_srvs.srv import Trigger
 
 from robot_ids.compat import default_cmd_vel_stamped
+from robot_ids.features import FEATURES, FeatureExtractor
 from robot_ids.detectors import (CmdConflictDetector, CmdOdomConsistencyDetector,
                                  OdomReplayDetector, RateDetector, ScanSanityDetector,
                                  check_publishers)
@@ -56,6 +58,12 @@ class MonitorNode(Node):
         self.declare_parameter('enabled_detectors',
                                ['rate', 'cmd_conflict', 'cmd_odom_consistency', 'scan_sanity',
                                 'odom_replay', 'publisher_allowlist', 'publisher_count'])
+        # Which detectors may raise the alarm: 'rules' (enabled_detectors),
+        # 'learned' (the trained models only), 'all' (both) or 'none'
+        # (observe only, used to record training data).
+        self.declare_parameter('detector_set', 'rules')
+        self.declare_parameter('learned_model_path', '~/ids_models/model.json')
+        self.declare_parameter('feature_period_s', 0.25)
 
         p = lambda name: self.get_parameter(name).value  # noqa: E731
         self.cmd_topic = p('cmd_vel_topic')
@@ -63,7 +71,18 @@ class MonitorNode(Node):
         self.scan_topic = p('scan_topic')
         self.allowed_cmd_pubs = list(p('allowed_cmd_vel_publishers'))
         self.max_pubs = p('max_publishers_per_topic')
-        self.enabled = set(p('enabled_detectors'))
+        self.rule_detectors = set(p('enabled_detectors'))
+        self.models = self.load_models(p('learned_model_path'))
+        detector_set = p('detector_set')
+        self.enabled = {
+            'rules': self.rule_detectors,
+            'learned': set(self.models),
+            'all': self.rule_detectors | set(self.models),
+            'none': set(),
+        }[detector_set]
+        if detector_set in ('learned', 'all') and not self.models:
+            self.get_logger().error(f"detector_set '{detector_set}' needs a trained model at "
+                                    f"{p('learned_model_path')} (see train_detector)")
         if not p('graph_checks'):
             # Lets you test the data-based detectors on their own: with graph
             # checks on, every injection attack is caught by its publisher.
@@ -84,11 +103,26 @@ class MonitorNode(Node):
         self.create_subscription(LaserScan, self.scan_topic, self.on_scan,
                                  qos_profile_sensor_data)
         self.create_timer(p('graph_check_period_s'), self.on_timer)
+        # Feature windows, for the learned detectors and for recording data.
+        self.feature_pub = self.create_publisher(String, '/ids/features', 10)
+        self.create_timer(p('feature_period_s'), self.on_feature_timer)
 
         self.attack_detected = False
         self.publish_alarm()
         self.get_logger().info(f'Monitoring {self.cmd_topic}, {self.odom_topic}, '
                                f'{self.scan_topic}; detectors: {sorted(self.enabled)}')
+
+    def load_models(self, path):
+        """Load the trained models, if there are any."""
+        path = os.path.expanduser(path)
+        if not os.path.exists(path):
+            return {}
+        from robot_ids.learned import load_models
+        specs = load_models(path)
+        models = {name: specs[name] for name in ('mlp', 'autoencoder') if name in specs}
+        self.consecutive = specs.get('consecutive', 2)
+        self.get_logger().info(f'Loaded learned models {sorted(models)} from {path}')
+        return models
 
     def reset_detectors(self):
         """(Re)create all detectors and restart the startup grace period."""
@@ -110,6 +144,13 @@ class MonitorNode(Node):
         self.start_time = None
         self.last_time = None
         self.last_event = {}
+        self.features = FeatureExtractor()
+        if self.models:
+            from robot_ids.learned import LearnedDetector
+            self.learned = [LearnedDetector(name, spec, consecutive=self.consecutive)
+                            for name, spec in self.models.items()]
+        else:
+            self.learned = []
 
     def now(self):
         """Current (simulation) time in seconds, or None if not usable yet.
@@ -143,6 +184,7 @@ class MonitorNode(Node):
         # is measured on the wall clock. Measured in simulation time, a 10 Hz
         # sender looks like 25 Hz when the simulation runs at 0.4x real time.
         self.rates[self.cmd_topic].add(time.monotonic())
+        self.features.add_cmd(t, time.monotonic(), twist.linear.x, twist.angular.z)
         self.consistency.add_cmd(t, twist.linear.x, twist.angular.z)
         self.report(self.conflict.add_cmd(t, twist.linear.x, twist.angular.z))
 
@@ -154,15 +196,19 @@ class MonitorNode(Node):
         tw = msg.twist.twist
         self.report(self.consistency.add_odom(t, tw.linear.x, tw.angular.z))
         pos = msg.pose.pose.position
-        self.report(self.odom_replay.update(stamp_to_sec(msg.header.stamp), pos.x, pos.y))
+        stamp = stamp_to_sec(msg.header.stamp)
+        self.features.add_odom(t, stamp, pos.x, pos.y, tw.linear.x, tw.angular.z)
+        self.report(self.odom_replay.update(stamp, pos.x, pos.y))
 
     def on_scan(self, msg):
         t = self.now()
         if t is None:
             return
         self.rates[self.scan_topic].add(t)
-        self.report(self.scan_sanity.update(stamp_to_sec(msg.header.stamp), msg.ranges,
-                                            msg.range_min, msg.range_max,
+        stamp = stamp_to_sec(msg.header.stamp)
+        self.features.add_scan(t, stamp, msg.ranges, msg.range_min, msg.range_max,
+                               msg.angle_min, msg.angle_increment)
+        self.report(self.scan_sanity.update(stamp, msg.ranges, msg.range_min, msg.range_max,
                                             msg.angle_increment))
 
     def on_timer(self):
@@ -176,6 +222,21 @@ class MonitorNode(Node):
                      for i in self.get_publishers_info_by_topic(topic)]
             allowed = self.allowed_cmd_pubs if topic == self.cmd_topic else None
             self.report(check_publishers(topic, names, allowed, self.max_pubs))
+
+    def on_feature_timer(self):
+        """Summarise the last window, publish it and run the learned models.
+
+        The models are tiny (a few hundred weights), so running them here
+        takes microseconds and does not hold up the other callbacks.
+        """
+        t = self.now()
+        if t is None or self.in_grace_period(t):
+            return
+        x = self.features.features(t, time.monotonic())
+        self.feature_pub.publish(String(data=json.dumps(
+            {'t': round(t, 3), 'features': dict(zip(FEATURES, (round(v, 5) for v in x)))})))
+        for detector in self.learned:
+            self.report(detector.check(x))
 
     @staticmethod
     def qualified(namespace, name):

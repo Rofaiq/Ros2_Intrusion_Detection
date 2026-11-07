@@ -9,10 +9,21 @@ domain ID can publish to any topic. This node uses that to run one attack:
   timestamps so the robot appears to be somewhere it is not.
 * ``flood``: publish zero commands on ``/cmd_vel`` at a very high rate (DoS).
 
+Two quieter attacks are harder for fixed rules:
+
+* ``scan_drift``: once a second, publish a real scan with every range
+  shortened by an offset that grows slowly, so an obstacle seems to creep
+  closer without any sudden jump.
+* ``cmd_bias``: read the legitimate commands (on ``cmd_vel_in``) and a few
+  times a second publish a copy with a small extra turn, so the robot drifts
+  off course without any large command jump.
+
 Only run this against your own simulation.
 """
 
+from collections import deque
 import json
+import math
 import time
 
 from geometry_msgs.msg import Twist, TwistStamped
@@ -27,7 +38,7 @@ from std_msgs.msg import String
 
 from robot_ids.compat import default_cmd_vel_stamped
 
-ATTACKS = ('cmd_vel_spoof', 'scan_spoof', 'odom_replay', 'flood')
+ATTACKS = ('cmd_vel_spoof', 'scan_spoof', 'odom_replay', 'flood', 'scan_drift', 'cmd_bias')
 
 
 class AttackInjectorNode(Node):
@@ -42,6 +53,9 @@ class AttackInjectorNode(Node):
         self.declare_parameter('spoof_angular', 1.5)
         self.declare_parameter('phantom_wall_m', 0.4)
         self.declare_parameter('flood_hz', 1000.0)
+        self.declare_parameter('drift_rate', 0.05)   # m/s, scan_drift
+        self.declare_parameter('drift_max', 0.5)     # m, scan_drift
+        self.declare_parameter('bias_angular', 0.3)  # rad/s, cmd_bias
         # Copied into the ground-truth messages so an experiment can tell
         # this run's messages apart from any other attacker's.
         self.declare_parameter('run_id', '')
@@ -57,6 +71,8 @@ class AttackInjectorNode(Node):
         self.last_scan = None
         self.recorded = []
         self.replay_index = 0
+        self.legit_cmd = None  # latest legitimate command (cmd_bias)
+        self.sent_stamps = deque(maxlen=50)  # stamps of our own fake scans
 
         # The attacker only advertises its publisher when the attack starts
         # and removes it when the attack ends, so the detection delay is
@@ -67,13 +83,17 @@ class AttackInjectorNode(Node):
         # Ground truth for experiments and datasets: when the attack really
         # started and ended, in the same (simulation) time as /ids/events.
         self.truth_pub = self.create_publisher(String, '/ids/attack_truth', 10)
-        if self.attack == 'scan_spoof':
+        if self.attack in ('scan_spoof', 'scan_drift'):
             self.create_subscription(LaserScan, '/scan', self.on_scan, qos_profile_sensor_data)
         elif self.attack == 'odom_replay':
             self.create_subscription(Odometry, '/odom', self.on_odom, 10)
+        elif self.attack == 'cmd_bias':
+            self.create_subscription(TwistStamped if self.stamped else Twist, '/cmd_vel_in',
+                                     self.on_legit_cmd, 10)
 
         rate = {'cmd_vel_spoof': 20.0, 'scan_spoof': 5.0, 'odom_replay': 30.0,
-                'flood': self.get_parameter('flood_hz').value}[self.attack]
+                'flood': self.get_parameter('flood_hz').value,
+                'scan_drift': 1.0, 'cmd_bias': 4.0}[self.attack]
         # Use the wall clock for the send rate. A timer on simulation time can
         # only fire when /clock ticks (10 Hz in Gazebo Classic), which would
         # silently cap every attack, including the 1 kHz flood, at 10 Hz.
@@ -104,9 +124,18 @@ class AttackInjectorNode(Node):
 
     def on_scan(self, msg):
         # Our own spoofed scans also arrive here; keep only real ones.
+        stamp = (msg.header.stamp.sec, msg.header.stamp.nanosec)
+        if stamp in self.sent_stamps:
+            return
         wall = self.get_parameter('phantom_wall_m').value
         if any(r != wall for r in msg.ranges):
             self.last_scan = msg
+
+    def on_legit_cmd(self, msg):
+        self.legit_cmd = msg.twist if isinstance(msg, TwistStamped) else msg
+
+    def elapsed_attack(self):
+        return self.now() - self.t0 - self.start_delay
 
     def on_odom(self, msg):
         if not self.started():
@@ -115,10 +144,10 @@ class AttackInjectorNode(Node):
             self.recorded.append(msg)
 
     def create_attack_publisher(self):
-        if self.attack in ('cmd_vel_spoof', 'flood'):
+        if self.attack in ('cmd_vel_spoof', 'flood', 'cmd_bias'):
             msg_type = TwistStamped if self.stamped else Twist
             return self.create_publisher(msg_type, '/cmd_vel', 10)
-        if self.attack == 'scan_spoof':
+        if self.attack in ('scan_spoof', 'scan_drift'):
             return self.create_publisher(LaserScan, '/scan', qos_profile_sensor_data)
         return self.create_publisher(Odometry, '/odom', 10)
 
@@ -177,11 +206,38 @@ class AttackInjectorNode(Node):
         fake = LaserScan()
         fake.header.frame_id = self.last_scan.header.frame_id
         fake.header.stamp = self.get_clock().now().to_msg()
+        self.sent_stamps.append((fake.header.stamp.sec, fake.header.stamp.nanosec))
         for field in ('angle_min', 'angle_max', 'angle_increment', 'time_increment',
                       'scan_time', 'range_min', 'range_max'):
             setattr(fake, field, getattr(self.last_scan, field))
         fake.ranges = [self.get_parameter('phantom_wall_m').value] * len(self.last_scan.ranges)
         self.pub.publish(fake)
+
+    def send_scan_drift(self):
+        if self.last_scan is None:
+            return
+        offset = min(self.get_parameter('drift_max').value,
+                     self.get_parameter('drift_rate').value * self.elapsed_attack())
+        real = self.last_scan
+        fake = LaserScan()
+        # Stamp it between two real scans (5 Hz), so stamps keep increasing.
+        ns = real.header.stamp.sec * 10**9 + real.header.stamp.nanosec + 10**8
+        fake.header.stamp.sec, fake.header.stamp.nanosec = divmod(ns, 10**9)
+        self.sent_stamps.append((fake.header.stamp.sec, fake.header.stamp.nanosec))
+        fake.header.frame_id = real.header.frame_id
+        for field in ('angle_min', 'angle_max', 'angle_increment', 'time_increment',
+                      'scan_time', 'range_min', 'range_max', 'intensities'):
+            setattr(fake, field, getattr(real, field))
+        fake.ranges = [max(r - offset, real.range_min) if math.isfinite(r) else r
+                       for r in real.ranges]
+        self.pub.publish(fake)
+
+    def send_cmd_bias(self):
+        if self.legit_cmd is None:
+            return
+        self.pub.publish(self.twist_msg(self.legit_cmd.linear.x,
+                                        self.legit_cmd.angular.z
+                                        + self.get_parameter('bias_angular').value))
 
     def send_odom_replay(self):
         if not self.recorded:

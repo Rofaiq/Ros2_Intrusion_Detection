@@ -107,3 +107,88 @@ def test_attacker_reports_truth_and_finishes():
         helper.destroy_node()
     finally:
         rclpy.try_shutdown()
+
+
+def run_attack(attack, setup, seconds=4.0, **params):
+    """Run one attack against a helper node under a 10 Hz sim clock."""
+    rclpy.init()
+    try:
+        overrides = [Parameter('use_sim_time', value=True), Parameter('attack', value=attack),
+                     Parameter('start_delay_s', value=0.0), Parameter('duration_s', value=0.0)]
+        overrides += [Parameter(k, value=v) for k, v in params.items()]
+        injector = AttackInjectorNode(parameter_overrides=overrides)
+        helper = rclpy.create_node('test_helper')
+        clock_pub = helper.create_publisher(Clock, '/clock', 10)
+        sim_t = [100.0]
+
+        def tick():
+            sim_t[0] += 0.1
+            sec = int(sim_t[0])
+            clock_pub.publish(Clock(clock=Time(sec=sec, nanosec=int((sim_t[0] - sec) * 1e9))))
+
+        helper.create_timer(0.1, tick)
+        received = setup(helper, sim_t)
+        executor = SingleThreadedExecutor()
+        executor.add_node(injector)
+        executor.add_node(helper)
+        end = time.monotonic() + seconds
+        while time.monotonic() < end:
+            executor.spin_once(timeout_sec=0.01)
+        injector.destroy_node()
+        helper.destroy_node()
+        return received
+    finally:
+        rclpy.try_shutdown()
+
+
+def test_cmd_bias_adds_a_small_turn_to_real_commands():
+    msg_type = TwistStamped if default_cmd_vel_stamped() else Twist
+
+    def setup(helper, sim_t):
+        pub = helper.create_publisher(msg_type, '/cmd_vel_in', 10)
+
+        def send():
+            msg = msg_type()
+            (msg.twist if default_cmd_vel_stamped() else msg).linear.x = 0.15
+            pub.publish(msg)
+
+        helper.create_timer(0.1, send)
+        got = []
+        helper.create_subscription(msg_type, '/cmd_vel', got.append, 100)
+        return got
+
+    got = run_attack('cmd_bias', setup, bias_angular=0.3)
+    twists = [m.twist if default_cmd_vel_stamped() else m for m in got]
+    assert len(twists) >= 5, 'cmd_bias sent too few commands'
+    assert all(abs(t.linear.x - 0.15) < 1e-9 and abs(t.angular.z - 0.3) < 1e-9 for t in twists)
+
+
+def test_scan_drift_shortens_ranges_slowly_with_increasing_stamps():
+    import math
+    from rclpy.qos import qos_profile_sensor_data
+    from sensor_msgs.msg import LaserScan
+
+    def setup(helper, sim_t):
+        pub = helper.create_publisher(LaserScan, '/scan', qos_profile_sensor_data)
+
+        def send():
+            msg = LaserScan()
+            sec = int(sim_t[0])
+            msg.header.stamp.sec, msg.header.stamp.nanosec = sec, int((sim_t[0] - sec) * 1e9)
+            msg.header.frame_id = 'base_scan'
+            msg.range_min, msg.range_max = 0.12, 3.5
+            msg.angle_min, msg.angle_increment = -math.pi, 2 * math.pi / 360
+            msg.ranges = [2.0] * 360
+            pub.publish(msg)
+
+        helper.create_timer(0.2, send)  # real LiDAR at 5 Hz
+        got = []
+        helper.create_subscription(
+            LaserScan, '/scan', lambda m: got.append(m) if m.ranges[0] < 2.0 else None,
+            qos_profile_sensor_data)
+        return got
+
+    fakes = run_attack('scan_drift', setup, seconds=5.0, drift_rate=0.05)
+    assert 2 <= len(fakes) <= 7, f'{len(fakes)} fake scans in 5 s (expected about 1 per second)'
+    offsets = [2.0 - f.ranges[0] for f in fakes]
+    assert all(0.0 < o <= 0.3 for o in offsets) and offsets == sorted(offsets)

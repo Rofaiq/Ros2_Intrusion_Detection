@@ -58,6 +58,37 @@ def trial_over(now, launched, truth, start_delay, duration, post_s, margin=5.0):
     return now >= launched + start_delay + duration + post_s + margin
 
 
+def label_windows(windows, results, duration_s, settle_after_s=2.0, window_s=1.0):
+    """Label recorded feature windows with the attack running at the time.
+
+    ``windows`` are dicts with ``t``, ``phase`` and ``trial`` (as recorded by
+    the experiment runner); ``results`` are the scored trials with their true
+    start and end. A window is labelled with the attack's name while the
+    attack runs, ``transition`` just after it (the window still overlaps the
+    attack, and the robot may still be recovering) or while the truth is
+    unknown, and ``normal`` otherwise.
+    """
+    spans = []
+    for r in results:
+        if r.start is not None:
+            end = r.end if r.end is not None else r.start + duration_s
+            spans.append((r.start, end, r.attack))
+    unknown = {f'{r.attack}#{r.trial}' for r in results if r.start is None}
+    rows = []
+    for w in windows:
+        label, start = 'normal', None
+        if w.get('phase') == 'attack' and w.get('trial') in unknown:
+            label = 'transition'
+        for s0, s1, attack in spans:
+            if s0 <= w['t'] <= s1:
+                label, start = attack, s0
+                break
+            if s1 < w['t'] <= s1 + window_s + settle_after_s:
+                label = 'transition'
+        rows.append(dict(w, label=label, attack_start=start))
+    return rows
+
+
 def summarize(results, baseline_s, false_alarms, real_time_factor=None):
     """Markdown report: one row per attack, plus the false-alarm rate.
 
