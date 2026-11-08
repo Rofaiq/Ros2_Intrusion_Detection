@@ -13,7 +13,7 @@ The "You learn" lines are the ROS 2 concepts to understand before moving on.
 * **Try:** run each attack, read the monitor log, then disable one detector in
   `config/monitor.yaml` and see which attacks get through.
 
-## Stage 2: Measure it
+## Stage 2: Measure it (done)
 
 * Script that runs each attack N times (plus attack-free runs) and logs
   `/ids/events` with `ros2 bag`.
@@ -23,7 +23,7 @@ The "You learn" lines are the ROS 2 concepts to understand before moving on.
 * **You learn:** `ros2 bag record/play`, `rosbag2_py` for reading bags in
   Python, `use_sim_time` and the `/clock` topic.
 
-## Stage 3: Learned detector
+## Stage 3: Learned detector (done)
 
 * Record labelled windows of features (message rates, command/odometry
   residual, scan change statistics) for normal and attack runs.

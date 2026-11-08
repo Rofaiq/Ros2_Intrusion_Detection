@@ -7,8 +7,8 @@ Detecting cyber attacks on a ROS 2 mobile robot and bringing it to a safe stop.
 ROS 2's default transport (DDS) has no authentication: any process on the same
 network and domain ID can publish velocity commands or fake sensor data. This
 project injects realistic attacks into a simulated TurtleBot3 and detects them
-with lightweight, physics-aware checks, building towards a learned detector in
-the spirit of industrial control-system intrusion detection
+with lightweight, physics-aware checks and with learned models (an MLP and an
+autoencoder), in the spirit of industrial control-system intrusion detection
 ([Ahmad, Mansoor et al., *Expert Systems with Applications*, 2026](https://doi.org/10.1016/j.eswa.2025.130463)).
 
 ## How it works
@@ -40,9 +40,14 @@ flowchart LR
 | `scan_spoof` | Publishes fake LiDAR scans of a nearby wall | scan rate, scan discontinuity, publisher count |
 | `odom_replay` | Replays recorded odometry with old timestamps | stamps going backwards, impossible jumps |
 | `flood` | Sends commands at ~1 kHz (DoS) | message rate, competing command streams |
+| `scan_drift` | Once a second, a real scan with every range shortened by a slowly growing offset, correctly stamped | scan discontinuity (after 2-3 s), learned models |
+| `cmd_bias` | Copies the real commands with a small extra turn, a few times a second | learned models only |
 
-The detectors live in [`robot_ids/detectors.py`](robot_ids/robot_ids/detectors.py)
-and have no ROS imports, so they are unit-tested with plain pytest.
+The rule-based detectors live in [`robot_ids/detectors.py`](robot_ids/robot_ids/detectors.py)
+and have no ROS imports, so they are unit-tested with plain pytest. Two
+learned detectors (an MLP and an autoencoder, see
+[Learned detectors](#learned-detectors)) run on features computed from the
+same topics.
 
 ## Quick start
 
@@ -146,6 +151,65 @@ How to read this:
 * Five minutes of normal driving per run is too short to claim a low
   false-alarm rate.
 
+## Learned detectors
+
+Every 0.25 s the monitor summarises the last second of `/cmd_vel`, `/odom` and
+`/scan` as 15 features ([`features.py`](robot_ids/robot_ids/features.py)):
+message rates, command jumps, command/odometry residuals, stamps going
+backwards, whether poses agree with reported speeds, and whether the scans
+agree with the odometry. Two small networks are trained offline with
+scikit-learn ([`train.py`](robot_ids/robot_ids/train.py)) and run inside the
+monitor with numpy only ([`learned.py`](robot_ids/robot_ids/learned.py)):
+
+* an **MLP** classifier, trained on normal and attack windows;
+* an **autoencoder**, trained on normal driving only, which flags any window
+  it cannot reconstruct, including attacks it has never seen.
+
+An alarm needs two windows in a row above the threshold.
+
+```bash
+# 1. Record labelled feature windows (alarm off, so attacks play out fully)
+ros2 launch robot_ids experiment.launch.py detectors:=none record:=true baseline_s:=600
+# 2. Train (trials 0-6 for training, 7-9 for testing) and print a report
+ros2 run robot_ids train_detector ~/ids_results/<date-time>/features.csv --out ~/ids_models/model.json
+# 3. Run the trained models live
+ros2 launch robot_ids experiment.launch.py detectors:=learned
+```
+
+### Rules vs. learned models
+
+Same setup as above, graph checks off, all six attacks, 10 trials each. The
+models were trained on a separate recording run (7,181 windows) and tested
+live on a new run:
+
+| Attack | Rules: detected | Rules: median (worst) delay | Learned: detected | Learned: median (worst) delay |
+|---|---|---|---|---|
+| `cmd_vel_spoof` | 10/10 | 0.10 s (0.20 s) | 10/10 | 0.45 s (0.50 s) |
+| `scan_spoof` | 10/10 | 0.00 s (0.00 s) | 10/10 | 0.40 s (0.50 s) |
+| `odom_replay` | 10/10 | 0.00 s (0.00 s) | 10/10 | 0.40 s (0.50 s) |
+| `flood` | 10/10 | 0.10 s (0.50 s) | 10/10 | 0.40 s (0.50 s) |
+| `scan_drift` | 10/10 | 2.00 s (3.00 s) | 10/10 | 0.40 s (1.20 s) |
+| `cmd_bias` | **0/10** | - | **10/10** | 0.55 s (1.10 s) |
+| False alarms | 0 in 5 min | | 1 in 10 min (autoencoder) | |
+
+Both models fired on every trial. What this shows:
+
+* The quiet attacks are where learning pays off. No rule catches `cmd_bias`,
+  whose small extra turn never makes a command jump or a rate change, and
+  the rules need 2-3 s to notice the drifting scans.
+* On the crude attacks the rules are faster: a rule fires on the first bad
+  message, while a model needs a window or two of evidence.
+* The models raised one false alarm in 10 minutes of normal driving
+  (6 per hour), against none for the rules. That is the price, and it needs
+  a longer baseline to measure properly.
+* The MLP has seen every attack type in training. In a leave-one-attack-out
+  test (the training report), an MLP trained without `flood` or without
+  `odom_replay` missed that attack completely, while the autoencoder,
+  trained on normal driving only, caught all six. For attacks nobody has
+  seen yet, anomaly detection is the safer choice.
+* The features were designed knowing what the attacks do, so these results
+  are optimistic for a truly novel attack.
+
 ## Limitations
 
 Detection is not prevention. An attacker publishing directly on `/cmd_vel`
@@ -158,8 +222,8 @@ the roadmap below.
 - [x] Attack injector, rule-based detectors, latched alarm and safety gate
 - [x] Experiment runner: detection rate, false alarms and time-to-detect
 - [x] Publish measured results here
-- [ ] Longer attack-free baselines, and stealthier attacks (re-stamped replay, gradual scan drift)
-- [ ] Record labelled datasets and train an MLP / autoencoder detector
+- [x] Record labelled datasets and train an MLP / autoencoder detector
+- [ ] Longer attack-free baselines, rules and learned models combined, more attacks (re-stamped replay)
 - [ ] Autonomous navigation with Nav2 during attacks
 - [ ] SROS2 access control, and a comparison of detection vs. prevention
 
